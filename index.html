@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Замена фона</title>
+<style>
+:root{--bg:#f6f6f4;--card:#fff;--tx:#1b1b1b;--mut:#6b6b6b;--ac:#2d6cdf;--bd:#dcdcd6}
+@media (prefers-color-scheme:dark){:root{--bg:#161616;--card:#202020;--tx:#eee;--mut:#9a9a9a;--ac:#6b9bff;--bd:#383838}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+main{max-width:860px;margin:0 auto;padding:20px 14px 60px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+.card h2{font-size:14px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:6px 0}
+label.opt{display:flex;gap:6px;align-items:center;cursor:pointer}
+input[type=text],select{padding:7px 9px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+input[type=range]{vertical-align:middle}
+button{padding:8px 14px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--tx);font:inherit;cursor:pointer}
+button.main{background:var(--ac);border-color:var(--ac);color:#fff;font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+.drop{border:2px dashed var(--bd);border-radius:12px;padding:26px;text-align:center;cursor:pointer;color:var(--mut)}
+.drop.on{border-color:var(--ac);color:var(--ac)}
+.chip{display:inline-flex;gap:6px;align-items:center;padding:3px 10px;border:1px solid var(--bd);border-radius:99px;cursor:pointer}
+.sw{width:26px;height:26px;border-radius:50%;border:1px solid var(--bd);padding:0}
+.mut{color:var(--mut);font-size:13px}
+#status{margin:10px 0;min-height:20px}
+.grp{margin-bottom:14px}.grp header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:6px}
+.thumbs{display:flex;flex-wrap:wrap;gap:10px}
+figure{margin:0;width:200px}figure img{width:100%;border-radius:8px;border:1px solid var(--bd);background:#8884}
+figure a{display:block;font-size:12px;word-break:break-all;color:var(--ac)}
+.warn{color:#d98200;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+<h1>Замена фона на фото вещей</h1>
+<p class="sub">Всё работает у тебя в браузере: фото никуда не загружаются. Модель (~100–200 МБ) скачивается один раз при первой обработке.</p>
+
+<div class="card">
+  <h2>1. Фото (1–10)</h2>
+  <div class="drop" id="drop">Перетащи фото сюда или нажми, чтобы выбрать<br><span class="mut" id="fcount"></span></div>
+  <input type="file" id="file" accept="image/*" multiple hidden>
+</div>
+
+<div class="card">
+  <h2>2. Размеры</h2>
+  <div class="row">
+    <input type="text" id="szin" placeholder="1200,900" size="12">
+    <button id="szadd">Добавить</button>
+    <button id="szclr">Очистить</button>
+  </div>
+  <div class="row" id="chips"></div>
+  <div class="mut">Без размеров: размер и пропорции как в оригинале. С размерами: вещь вписывается целиком, остаток заливается фоном. Можно несколько размеров.</div>
+  <div class="row">Отступ от краёв: <input type="range" id="pad" min="0" max="40" value="5"> <b id="padv">5</b>%</div>
+</div>
+
+<div class="card">
+  <h2>3. Фон</h2>
+  <div class="row">
+    <label class="opt"><input type="radio" name="bg" value="color" checked> Цвет</label>
+    <input type="color" id="color" value="#ffffff">
+    <button class="sw" data-c="#ffffff" style="background:#fff"></button>
+    <button class="sw" data-c="#f0f0f0" style="background:#f0f0f0"></button>
+    <button class="sw" data-c="#f5e6d3" style="background:#f5e6d3"></button>
+    <button class="sw" data-c="#000000" style="background:#000"></button>
+  </div>
+  <div class="row">
+    <label class="opt"><input type="radio" name="bg" value="blur"> Размытый фон из оригинала</label>
+    <input type="range" id="blur" min="1" max="100" value="30"> <b id="blurv">30</b>
+  </div>
+  <div class="row">
+    <label class="opt"><input type="radio" name="bg" value="image"> Своя картинка</label>
+    <button id="bgpick">Выбрать…</button><span class="mut" id="bgname">не выбрана</span>
+    <input type="file" id="bgfile" accept="image/*" hidden>
+  </div>
+  <div class="row">
+    <label class="opt"><input type="radio" name="bg" value="none"> Без смены фона (только размер)</label>
+  </div>
+  <div class="row">
+    <label class="opt"><input type="checkbox" id="leak"> Чистка просветов (манекен / фон внутри вещи)</label>
+  </div>
+  <div class="mut">Чистку не включай для белой вещи на белом фоне: она сотрёт вещь.</div>
+  <div class="row">Формат результата:
+    <select id="fmt"><option value="jpg">JPG</option><option value="png">PNG</option></select>
+  </div>
+</div>
+
+<button class="main" id="go">Обработать</button>
+<button id="dlall" hidden>Скачать всё</button>
+<div id="status"></div>
+<div id="results"></div>
+</main>
+
+<script type="module">
+import { AutoModel, AutoProcessor, RawImage } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1";
+
+const MODEL = "onnx-community/BiRefNet_lite-ONNX";
+const S = 1024, MAXS = 3000;
+const $ = s => document.querySelector(s);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const cv = (w, h) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; };
+const cx = c => c.getContext("2d", { willReadFrequently: true });
+const status = t => $("#status").textContent = t;
+const bgVal = () => document.querySelector("input[name=bg]:checked").value;
+
+let sizes = [], files = [], bgImg = null, groups = [], busy = false;
+let model, processor;
+
+/* ---------- настройки ---------- */
+const KEY = "bgswap.v1";
+function save() {
+  try {
+    localStorage.setItem(KEY, JSON.stringify({
+      sizes, bg: bgVal(), color: $("#color").value, blur: $("#blur").value,
+      pad: $("#pad").value, fmt: $("#fmt").value, leak: $("#leak").checked }));
+  } catch {}
+}
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(KEY) || "{}");
+    if (s.sizes) sizes = s.sizes;
+    if (s.bg) { const r = document.querySelector(`input[name=bg][value=${s.bg}]`); if (r && s.bg !== "image") r.checked = true; }
+    if (s.color) $("#color").value = s.color;
+    if (s.blur) $("#blur").value = s.blur;
+    if (s.pad) $("#pad").value = s.pad;
+    if (s.fmt) $("#fmt").value = s.fmt;
+    $("#leak").checked = !!s.leak;
+  } catch {}
+  $("#padv").textContent = $("#pad").value;
+  $("#blurv").textContent = $("#blur").value;
+  drawChips();
+}
+function drawChips() {
+  const box = $("#chips"); box.innerHTML = "";
+  sizes.forEach(([w, h], i) => {
+    const c = document.createElement("span");
+    c.className = "chip"; c.textContent = `${w}×${h}  ✕`;
+    c.onclick = () => { sizes.splice(i, 1); drawChips(); save(); };
+    box.append(c);
+  });
+}
+
+/* ---------- UI ---------- */
+$("#szadd").onclick = () => {
+  const re = /(\d{2,5})\s*[,xXхХ×*:\s]\s*(\d{2,5})/g; let m;
+  while ((m = re.exec($("#szin").value))) {
+    const w = +m[1], h = +m[2];
+    if (w >= 16 && h >= 16 && w <= 8000 && h <= 8000 && !sizes.some(s => s[0] === w && s[1] === h)) sizes.push([w, h]);
+  }
+  $("#szin").value = ""; drawChips(); save();
+};
+$("#szin").onkeydown = e => { if (e.key === "Enter") $("#szadd").click(); };
+$("#szclr").onclick = () => { sizes = []; drawChips(); save(); };
+$("#pad").oninput = e => { $("#padv").textContent = e.target.value; save(); };
+$("#blur").oninput = e => { $("#blurv").textContent = e.target.value; document.querySelector("input[value=blur]").checked = true; save(); };
+$("#color").oninput = () => { document.querySelector("input[value=color]").checked = true; save(); };
+document.querySelectorAll(".sw").forEach(b => b.onclick = () => {
+  $("#color").value = b.dataset.c; document.querySelector("input[value=color]").checked = true; save(); });
+document.querySelectorAll("input[name=bg],#fmt,#leak").forEach(e => e.onchange = save);
+
+const drop = $("#drop");
+drop.onclick = () => $("#file").click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("on"); };
+drop.ondragleave = () => drop.classList.remove("on");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("on"); setFiles(e.dataTransfer.files); };
+$("#file").onchange = e => setFiles(e.target.files);
+function setFiles(list) {
+  files = [...list].filter(f => f.type.startsWith("image/")).slice(0, 10);
+  $("#fcount").textContent = files.length ? `Выбрано: ${files.length}` : "";
+}
+$("#bgpick").onclick = () => $("#bgfile").click();
+$("#bgfile").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    bgImg = await createImageBitmap(f, { imageOrientation: "from-image" });
+    $("#bgname").textContent = f.name;
+    document.querySelector("input[value=image]").checked = true; save();
+  } catch { status("Не удалось прочитать картинку фона"); }
+};
+
+/* ---------- модель ---------- */
+function progress(p) {
+  if (p.status === "progress") status(`Загружаю модель: ${(p.file || "").split("/").pop()} ${Math.round(p.progress || 0)}%`);
+}
+async function loadModel() {
+  if (model) return;
+  status("Загружаю модель…");
+  const gpu = !!navigator.gpu;
+  try {
+    model = await AutoModel.from_pretrained(MODEL, { device: gpu ? "webgpu" : "wasm", dtype: gpu ? "fp16" : "fp32", progress_callback: progress });
+  } catch (e) {
+    console.warn("Основной запуск не вышел, пробую wasm", e);
+    model = await AutoModel.from_pretrained(MODEL, { device: "wasm", dtype: "fp32", progress_callback: progress });
+  }
+  processor = await AutoProcessor.from_pretrained(MODEL);
+}
+async function runModel(pv) {
+  let last;
+  for (const k of ["input_image", "input", "pixel_values"]) {
+    try { return await model({ [k]: pv }); } catch (e) { last = e; }
+  }
+  throw last;
+}
+async function inferMask(px) {
+  await loadModel();
+  const rgb = new Uint8ClampedArray(S * S * 3);
+  for (let i = 0, j = 0; i < px.length; i += 4, j += 3) { rgb[j] = px[i]; rgb[j + 1] = px[i + 1]; rgb[j + 2] = px[i + 2]; }
+  const { pixel_values } = await processor(new RawImage(rgb, S, S, 3));
+  const out = await runModel(pixel_values);
+  let t = Object.values(out)[0];
+  if (t.type !== "float32") t = t.to("float32");
+  const d = t.getData ? await t.getData() : t.data;
+  let mn = 1e9, mx = -1e9;
+  for (let i = 0; i < S * S; i++) { const v = d[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+  const sig = mn < 0 || mx > 1, m = new Uint8Array(S * S);
+  for (let i = 0; i < S * S; i++) { let v = d[i]; if (sig) v = 1 / (1 + Math.exp(-v)); m[i] = Math.round(v * 255); }
+  return m;
+}
+
+/* ---------- маска ---------- */
+function getSmall(src) {
+  const c = cv(S, S), x = cx(c); x.drawImage(src, 0, 0, S, S);
+  return x.getImageData(0, 0, S, S).data;
+}
+function borderColor(px) {
+  const R = [], G = [], B = [];
+  const add = (x, y) => { const j = (y * S + x) * 4; R.push(px[j]); G.push(px[j + 1]); B.push(px[j + 2]); };
+  for (let i = 0; i < S; i++) for (let k = 0; k < 4; k++) { add(i, k); add(i, S - 1 - k); add(k, i); add(S - 1 - k, i); }
+  const med = a => a.sort((p, q) => p - q)[a.length >> 1];
+  return [med(R), med(G), med(B)];
+}
+function fixSmall(m, thr) {   // убирает мелкие пятна и закрашивает мелкие дырки
+  const N = S * S, q = new Int32Array(N);
+  for (const fg of [true, false]) {
+    const seen = new Uint8Array(N);
+    for (let s = 0; s < N; s++) {
+      if (seen[s] || (m[s] > 127) !== fg) continue;
+      let h = 0, t = 0; q[t++] = s; seen[s] = 1;
+      while (h < t) {
+        const p = q[h++], x = p % S, y = (p / S) | 0;
+        let n;
+        if (x > 0 && !seen[n = p - 1] && (m[n] > 127) === fg) { seen[n] = 1; q[t++] = n; }
+        if (x < S - 1 && !seen[n = p + 1] && (m[n] > 127) === fg) { seen[n] = 1; q[t++] = n; }
+        if (y > 0 && !seen[n = p - S] && (m[n] > 127) === fg) { seen[n] = 1; q[t++] = n; }
+        if (y < S - 1 && !seen[n = p + S] && (m[n] > 127) === fg) { seen[n] = 1; q[t++] = n; }
+      }
+      if (t < thr) for (let i = 0; i < t; i++) m[q[i]] = fg ? 0 : 255;
+    }
+  }
+}
+function buildMask(entry, leak) {
+  const m = entry.raw.slice(), px = entry.small;
+  if (leak) {
+    const [br, bg, bb] = borderColor(px);
+    for (let i = 0; i < S * S; i++) {
+      const j = i * 4, a = px[j] - br, b = px[j + 1] - bg, c = px[j + 2] - bb;
+      if (a * a + b * b + c * c < 400) m[i] = 0;
+    }
+  }
+  fixSmall(m, (S * S * 0.0004) | 0);
+  return m;
+}
+function fullAlpha(m, w, h) {
+  const mc = cv(S, S), id = cx(mc).createImageData(S, S);
+  for (let i = 0; i < S * S; i++) { id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = m[i]; id.data[i * 4 + 3] = 255; }
+  mc.getContext("2d").putImageData(id, 0, 0);
+  const big = cv(w, h), bx = cx(big); bx.imageSmoothingQuality = "high"; bx.drawImage(mc, 0, 0, w, h);
+  const d = bx.getImageData(0, 0, w, h).data, a = new Uint8ClampedArray(w * h);
+  for (let i = 0; i < a.length; i++) a[i] = (d[i * 4] - 40) * 255 / 175;   // чуть подтягиваем край внутрь
+  return a;
+}
+
+/* ---------- блюр-фон ---------- */
+function boxBlur(a, T, r) {
+  const tmp = new Float32Array(T * T);
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    let s = 0; for (let k = Math.max(0, x - r); k <= Math.min(T - 1, x + r); k++) s += a[y * T + k]; tmp[y * T + x] = s; }
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    let s = 0; for (let k = Math.max(0, y - r); k <= Math.min(T - 1, y + r); k++) s += tmp[k * T + x]; a[y * T + x] = s; }
+}
+function blurBackdrop(px, m, strength) {
+  const T = 128, k = S / T, n = k * k;
+  const ch = [0, 1, 2, 3].map(() => new Float32Array(T * T));
+  let gr = 0, gg = 0, gb = 0, gw = 0;
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    let r = 0, g = 0, b = 0, a = 0;
+    for (let dy = 0; dy < k; dy++) for (let dx = 0; dx < k; dx++) {
+      const i = (y * k + dy) * S + x * k + dx; r += px[i * 4]; g += px[i * 4 + 1]; b += px[i * 4 + 2]; a += m[i]; }
+    const w = a / n < 2 ? 1 : 0, o = y * T + x;
+    ch[0][o] = r / n * w; ch[1][o] = g / n * w; ch[2][o] = b / n * w; ch[3][o] = w;
+    gr += ch[0][o]; gg += ch[1][o]; gb += ch[2][o]; gw += w;
+  }
+  const rad = Math.round(2 + strength / 100 * 14);
+  ch.forEach(a => { for (let i = 0; i < 3; i++) boxBlur(a, T, rad); });
+  const c = cv(T, T), id = cx(c).createImageData(T, T);
+  for (let o = 0; o < T * T; o++) {
+    const w = ch[3][o];
+    const f = w > 1e-3 ? [ch[0][o] / w, ch[1][o] / w, ch[2][o] / w] : [gr / (gw || 1), gg / (gw || 1), gb / (gw || 1)];
+    id.data[o * 4] = f[0]; id.data[o * 4 + 1] = f[1]; id.data[o * 4 + 2] = f[2]; id.data[o * 4 + 3] = 255;
+  }
+  c.getContext("2d").putImageData(id, 0, 0);
+  return c;
+}
+
+/* ---------- сборка результата ---------- */
+function cover(x, img, W, H) {
+  const s = Math.max(W / img.width, H / img.height), dw = img.width * s, dh = img.height * s;
+  x.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+}
+async function renderAll(entry, o, leak) {
+  const w = entry.src.width, h = entry.src.height, hasSizes = o.sizes.length > 0;
+  const list = hasSizes ? o.sizes : [[w, h]];
+  let fg, box, back, warn = "";
+
+  if (o.bg !== "none") {
+    const m = buildMask(entry, leak);
+    let cnt = 0; for (let i = 0; i < m.length; i++) if (m[i] > 127) cnt++;
+    const ratio = cnt / m.length;
+    if (ratio < 0.01 || ratio > 0.97) warn = "⚠ маска выглядит подозрительно, проверь результат";
+    const a = fullAlpha(m, w, h);
+    let x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (a[y * w + x] > 8) {
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 < 0) throw new Error("предмет не найден");
+    box = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+    const id = cx(entry.src).getImageData(0, 0, w, h);
+    for (let i = 0; i < a.length; i++) id.data[i * 4 + 3] = a[i];
+    fg = cv(w, h); fg.getContext("2d").putImageData(id, 0, 0);
+    if (o.bg === "blur") back = blurBackdrop(entry.small, m, o.blur);
+    if (o.bg === "image") back = bgImg;
+  }
+
+  const outs = [], stem = entry.name.replace(/\.[^.]+$/, "");
+  for (const [W, H] of list) {
+    const c = cv(W, H), x = c.getContext("2d"); x.imageSmoothingQuality = "high";
+    if (o.bg === "none") {
+      const [r, g, b] = borderColor(entry.small);
+      x.fillStyle = `rgb(${r},${g},${b})`; x.fillRect(0, 0, W, H);
+      const s = Math.min(W / w, H / h), nw = Math.round(w * s), nh = Math.round(h * s);
+      x.drawImage(entry.src, Math.round((W - nw) / 2), Math.round((H - nh) / 2), nw, nh);
+    } else {
+      if (o.bg === "color") { x.fillStyle = o.color; x.fillRect(0, 0, W, H); } else cover(x, back, W, H);
+      if (hasSizes) {
+        const p = o.pad / 100, s = Math.min(W * (1 - 2 * p) / box.w, H * (1 - 2 * p) / box.h);
+        const nw = Math.max(1, Math.round(box.w * s)), nh = Math.max(1, Math.round(box.h * s));
+        x.drawImage(fg, box.x, box.y, box.w, box.h, Math.round((W - nw) / 2), Math.round((H - nh) / 2), nw, nh);
+      } else x.drawImage(fg, 0, 0);
+    }
+    const blob = await new Promise(r => c.toBlob(r, o.fmt === "png" ? "image/png" : "image/jpeg", 0.95));
+    outs.push({ name: `${stem}_${hasSizes ? W + "x" + H : "new"}.${o.fmt}`, blob });
+  }
+  return { outs, warn };
+}
+
+/* ---------- вывод ---------- */
+function showGroup(g, res) {
+  g.urls.forEach(u => URL.revokeObjectURL(u)); g.urls = [];
+  g.warn.textContent = res.warn || "";
+  g.thumbs.innerHTML = "";
+  res.outs.forEach(o => {
+    const u = URL.createObjectURL(o.blob); g.urls.push(u);
+    const f = document.createElement("figure"), im = document.createElement("img"), a = document.createElement("a");
+    im.src = u; a.href = u; a.download = o.name; a.textContent = o.name; g.links.push(a);
+    f.append(im, a); g.thumbs.append(f);
+  });
+}
+function newGroup(entry) {
+  const el = document.createElement("div"); el.className = "grp";
+  const head = document.createElement("header"), title = document.createElement("b"), warn = document.createElement("span"), btn = document.createElement("button");
+  title.textContent = entry.name; warn.className = "warn"; btn.textContent = "Чистка просветов: переключить";
+  const thumbs = document.createElement("div"); thumbs.className = "thumbs";
+  head.append(title, btn, warn); el.append(head, thumbs); $("#results").append(el);
+  const g = { entry, el, thumbs, warn, urls: [], links: [], leak: $("#leak").checked, o: null };
+  btn.onclick = async () => {
+    if (busy) return; busy = true; btn.disabled = true;
+    try {
+      g.leak = !g.leak; g.links.length = 0;
+      showGroup(g, await renderAll(entry, readOpts(), g.leak));
+      status(`Чистка просветов для ${entry.name}: ${g.leak ? "вкл" : "выкл"}`);
+    } catch (e) { status("Ошибка: " + e.message); }
+    busy = false; btn.disabled = false;
+  };
+  groups.push(g);
+  return g;
+}
+
+function readOpts() {
+  return { sizes: sizes.map(s => s.slice()), bg: bgVal(), color: $("#color").value, blur: +$("#blur").value,
+    pad: +$("#pad").value, fmt: $("#fmt").value };
+}
+
+$("#go").onclick = async () => {
+  if (busy) return;
+  const o = readOpts();
+  if (!files.length) return status("Сначала выбери фото");
+  if (o.bg === "none" && !o.sizes.length) return status("Нечего делать: выбери фон или добавь размер");
+  if (o.bg === "image" && !bgImg) return status("Выбери картинку фона");
+  busy = true; $("#go").disabled = true; $("#dlall").hidden = true;
+  groups.forEach(g => g.urls.forEach(u => URL.revokeObjectURL(u))); groups = []; $("#results").innerHTML = "";
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      status(`Обработка ${i + 1}/${files.length}: ${f.name}`);
+      try {
+        const bmp = await createImageBitmap(f, { imageOrientation: "from-image" });
+        const s = Math.min(1, MAXS / Math.max(bmp.width, bmp.height));
+        const src = cv(Math.round(bmp.width * s), Math.round(bmp.height * s));
+        cx(src).drawImage(bmp, 0, 0, src.width, src.height); bmp.close();
+        const entry = { name: f.name, src, small: getSmall(src), raw: null };
+        if (o.bg !== "none") entry.raw = await inferMask(entry.small);
+        await sleep(0);
+        const g = newGroup(entry);
+        showGroup(g, await renderAll(entry, o, g.leak));
+      } catch (e) {
+        console.error(e);
+        const d = document.createElement("div"); d.className = "warn"; d.textContent = `❌ ${f.name}: ${e.message || e}`;
+        $("#results").append(d);
+      }
+    }
+    status("Готово");
+    $("#dlall").hidden = !groups.length;
+  } catch (e) { console.error(e); status("Ошибка: " + (e.message || e)); }
+  busy = false; $("#go").disabled = false;
+};
+
+$("#dlall").onclick = async () => {
+  for (const g of groups) for (const a of g.links) { a.click(); await sleep(350); }
+};
+
+load();
+</script>
+</body>
+</html>
