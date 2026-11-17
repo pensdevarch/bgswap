@@ -31,6 +31,11 @@ button:disabled{opacity:.5;cursor:default}
 figure{margin:0;width:200px}figure img{width:100%;border-radius:8px;border:1px solid var(--bd);background:#8884}
 figure a{display:block;font-size:12px;word-break:break-all;color:var(--ac)}
 .warn{color:#d98200;font-size:13px}
+.prev figure{width:90px;position:relative}.prev img{height:90px;object-fit:cover;cursor:zoom-in}
+.prev .x{position:absolute;top:3px;right:3px;padding:0 7px;border-radius:99px;background:#000a;color:#fff;border:0}
+figure img{cursor:zoom-in}.tag{font-size:12px;color:var(--mut);word-break:break-all}
+#lb{position:fixed;inset:0;background:#000d;display:none;align-items:center;justify-content:center;z-index:9;cursor:zoom-out}
+#lb img{max-width:96vw;max-height:96vh;width:auto;border:0}
 </style>
 </head>
 <body>
@@ -42,6 +47,7 @@ figure a{display:block;font-size:12px;word-break:break-all;color:var(--ac)}
   <h2>1. Фото (1–10)</h2>
   <div class="drop" id="drop">Перетащи фото сюда или нажми, чтобы выбрать<br><span class="mut" id="fcount"></span></div>
   <input type="file" id="file" accept="image/*" multiple hidden>
+  <div class="thumbs prev" id="prev"></div>
 </div>
 
 <div class="card">
@@ -85,12 +91,17 @@ figure a{display:block;font-size:12px;word-break:break-all;color:var(--ac)}
   <div class="row">Формат результата:
     <select id="fmt"><option value="jpg">JPG</option><option value="png">PNG</option></select>
   </div>
+  <div class="row">Запуск модели:
+    <select id="eng"><option value="auto">Авто (видеокарта, если есть)</option><option value="cpu">Только процессор (надёжнее)</option></select>
+  </div>
 </div>
 
 <button class="main" id="go">Обработать</button>
-<button id="dlall" hidden>Скачать всё</button>
+<button id="dlall" hidden>Скачать всё (ZIP)</button>
+<button id="share" hidden>Сохранить в галерею / поделиться</button>
 <div id="status"></div>
 <div id="results"></div>
+<div id="lb"><img alt=""></div>
 </main>
 
 <script type="module">
@@ -114,7 +125,7 @@ function save() {
   try {
     localStorage.setItem(KEY, JSON.stringify({
       sizes, bg: bgVal(), color: $("#color").value, blur: $("#blur").value,
-      pad: $("#pad").value, fmt: $("#fmt").value, leak: $("#leak").checked }));
+      pad: $("#pad").value, fmt: $("#fmt").value, leak: $("#leak").checked, eng: $("#eng").value }));
   } catch {}
 }
 function load() {
@@ -126,6 +137,7 @@ function load() {
     if (s.blur) $("#blur").value = s.blur;
     if (s.pad) $("#pad").value = s.pad;
     if (s.fmt) $("#fmt").value = s.fmt;
+    if (s.eng) $("#eng").value = s.eng;
     $("#leak").checked = !!s.leak;
   } catch {}
   $("#padv").textContent = $("#pad").value;
@@ -158,7 +170,7 @@ $("#blur").oninput = e => { $("#blurv").textContent = e.target.value; document.q
 $("#color").oninput = () => { document.querySelector("input[value=color]").checked = true; save(); };
 document.querySelectorAll(".sw").forEach(b => b.onclick = () => {
   $("#color").value = b.dataset.c; document.querySelector("input[value=color]").checked = true; save(); });
-document.querySelectorAll("input[name=bg],#fmt,#leak").forEach(e => e.onchange = save);
+document.querySelectorAll("input[name=bg],#fmt,#leak,#eng").forEach(e => e.onchange = save);
 
 const drop = $("#drop");
 drop.onclick = () => $("#file").click();
@@ -166,10 +178,23 @@ drop.ondragover = e => { e.preventDefault(); drop.classList.add("on"); };
 drop.ondragleave = () => drop.classList.remove("on");
 drop.ondrop = e => { e.preventDefault(); drop.classList.remove("on"); setFiles(e.dataTransfer.files); };
 $("#file").onchange = e => setFiles(e.target.files);
+let prevUrls = [];
 function setFiles(list) {
-  files = [...list].filter(f => f.type.startsWith("image/")).slice(0, 10);
-  $("#fcount").textContent = files.length ? `Выбрано: ${files.length}` : "";
+  files = [...files, ...[...list].filter(f => f.type.startsWith("image/"))].slice(0, 10);
+  $("#file").value = ""; renderPrev();
 }
+function renderPrev() {
+  prevUrls.forEach(u => URL.revokeObjectURL(u)); prevUrls = [];
+  const box = $("#prev"); box.innerHTML = "";
+  files.forEach((f, i) => {
+    const fg = document.createElement("figure"), im = document.createElement("img"), x = document.createElement("button");
+    const u = URL.createObjectURL(f); prevUrls.push(u); im.src = u; im.title = f.name;
+    x.className = "x"; x.textContent = "✕"; x.onclick = e => { e.stopPropagation(); files.splice(i, 1); renderPrev(); };
+    fg.append(im, x); box.append(fg);
+  });
+  $("#fcount").textContent = files.length ? `Выбрано: ${files.length} (нажми ✕ на фото, чтобы убрать)` : "";
+}
+$("#prev").onclick = e => e.stopPropagation();
 $("#bgpick").onclick = () => $("#bgfile").click();
 $("#bgfile").onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
@@ -181,17 +206,28 @@ $("#bgfile").onchange = async e => {
 };
 
 /* ---------- модель ---------- */
+let usedGpu = false;
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), ms))]);
 function progress(p) {
   if (p.status === "progress") status(`Загружаю модель: ${(p.file || "").split("/").pop()} ${Math.round(p.progress || 0)}%`);
+  else if (p.status === "done") status("Модель загружена, запускаю (первый раз может занять около минуты)…");
 }
 async function loadModel() {
   if (model) return;
   status("Загружаю модель…");
-  const gpu = !!navigator.gpu;
-  try {
-    model = await AutoModel.from_pretrained(MODEL, { device: gpu ? "webgpu" : "wasm", dtype: gpu ? "fp16" : "fp32", progress_callback: progress });
-  } catch (e) {
-    console.warn("Основной запуск не вышел, пробую wasm", e);
+  usedGpu = false;
+  if (navigator.gpu && $("#eng").value === "auto") {
+    try {
+      model = await withTimeout(AutoModel.from_pretrained(MODEL, { device: "webgpu", dtype: "fp16", progress_callback: progress }), 120000);
+      usedGpu = true;
+    } catch (e) {
+      console.warn("Видеокарта не подошла", e);
+      model = null;
+      status("Видеокарта не подошла, перехожу на процессор…");
+    }
+  }
+  if (!model) {
+    status("Загружаю модель для процессора (~220 МБ, один раз)…");
     model = await AutoModel.from_pretrained(MODEL, { device: "wasm", dtype: "fp32", progress_callback: progress });
   }
   processor = await AutoProcessor.from_pretrained(MODEL);
@@ -208,7 +244,17 @@ async function inferMask(px) {
   const rgb = new Uint8ClampedArray(S * S * 3);
   for (let i = 0, j = 0; i < px.length; i += 4, j += 3) { rgb[j] = px[i]; rgb[j + 1] = px[i + 1]; rgb[j + 2] = px[i + 2]; }
   const { pixel_values } = await processor(new RawImage(rgb, S, S, 3));
-  const out = await runModel(pixel_values);
+  let out;
+  try {
+    out = usedGpu ? await withTimeout(runModel(pixel_values), 150000) : await runModel(pixel_values);
+  } catch (e) {
+    if (!usedGpu) throw e;
+    console.warn("Видеокарта не справилась", e);
+    status("Видеокарта не справилась, переключаюсь на процессор…");
+    model = null; $("#eng").value = "cpu"; save();
+    await loadModel();
+    out = await runModel(pixel_values);
+  }
   let t = Object.values(out)[0];
   if (t.type !== "float32") t = t.to("float32");
   const d = t.getData ? await t.getData() : t.data;
@@ -356,15 +402,17 @@ async function renderAll(entry, o, leak) {
 
 /* ---------- вывод ---------- */
 function showGroup(g, res) {
-  g.urls.forEach(u => URL.revokeObjectURL(u)); g.urls = [];
-  g.warn.textContent = res.warn || "";
+  g.urls.forEach(u => URL.revokeObjectURL(u)); g.urls = []; g.links.length = 0;
+  g.outs = res.outs; g.warn.textContent = res.warn || "";
   g.thumbs.innerHTML = "";
-  res.outs.forEach(o => {
-    const u = URL.createObjectURL(o.blob); g.urls.push(u);
-    const f = document.createElement("figure"), im = document.createElement("img"), a = document.createElement("a");
-    im.src = u; a.href = u; a.download = o.name; a.textContent = o.name; g.links.push(a);
-    f.append(im, a); g.thumbs.append(f);
-  });
+  const add = (u, label, dl) => {
+    const f = document.createElement("figure"), im = document.createElement("img"), t = document.createElement("div");
+    im.src = u; t.className = "tag"; t.textContent = label; f.append(im, t);
+    if (dl) { const a = document.createElement("a"); a.href = u; a.download = dl; a.textContent = "Скачать"; g.links.push(a); f.append(a); }
+    g.thumbs.append(f);
+  };
+  add(g.orig, "До", null);
+  res.outs.forEach(o => { const u = URL.createObjectURL(o.blob); g.urls.push(u); add(u, "После: " + o.name, o.name); });
 }
 function newGroup(entry) {
   const el = document.createElement("div"); el.className = "grp";
@@ -372,7 +420,7 @@ function newGroup(entry) {
   title.textContent = entry.name; warn.className = "warn"; btn.textContent = "Чистка просветов: переключить";
   const thumbs = document.createElement("div"); thumbs.className = "thumbs";
   head.append(title, btn, warn); el.append(head, thumbs); $("#results").append(el);
-  const g = { entry, el, thumbs, warn, urls: [], links: [], leak: $("#leak").checked, o: null };
+  const g = { entry, el, thumbs, warn, urls: [], links: [], outs: [], orig: URL.createObjectURL(entry.file), leak: $("#leak").checked };
   btn.onclick = async () => {
     if (busy) return; busy = true; btn.disabled = true;
     try {
@@ -397,8 +445,8 @@ $("#go").onclick = async () => {
   if (!files.length) return status("Сначала выбери фото");
   if (o.bg === "none" && !o.sizes.length) return status("Нечего делать: выбери фон или добавь размер");
   if (o.bg === "image" && !bgImg) return status("Выбери картинку фона");
-  busy = true; $("#go").disabled = true; $("#dlall").hidden = true;
-  groups.forEach(g => g.urls.forEach(u => URL.revokeObjectURL(u))); groups = []; $("#results").innerHTML = "";
+  busy = true; $("#go").disabled = true; $("#dlall").hidden = true; $("#share").hidden = true;
+  groups.forEach(g => { g.urls.forEach(u => URL.revokeObjectURL(u)); URL.revokeObjectURL(g.orig); }); groups = []; $("#results").innerHTML = "";
   try {
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
@@ -408,7 +456,7 @@ $("#go").onclick = async () => {
         const s = Math.min(1, MAXS / Math.max(bmp.width, bmp.height));
         const src = cv(Math.round(bmp.width * s), Math.round(bmp.height * s));
         cx(src).drawImage(bmp, 0, 0, src.width, src.height); bmp.close();
-        const entry = { name: f.name, src, small: getSmall(src), raw: null };
+        const entry = { name: f.name, file: f, src, small: getSmall(src), raw: null };
         if (o.bg !== "none") entry.raw = await inferMask(entry.small);
         await sleep(0);
         const g = newGroup(entry);
@@ -420,14 +468,44 @@ $("#go").onclick = async () => {
       }
     }
     status("Готово");
-    $("#dlall").hidden = !groups.length;
+    $("#dlall").hidden = !groups.length; $("#share").hidden = !groups.length || !navigator.canShare;
   } catch (e) { console.error(e); status("Ошибка: " + (e.message || e)); }
   busy = false; $("#go").disabled = false;
 };
 
 $("#dlall").onclick = async () => {
-  for (const g of groups) for (const a of g.links) { a.click(); await sleep(350); }
+  const all = groups.flatMap(g => g.outs || []);
+  if (!all.length) return;
+  status("Собираю ZIP…");
+  try {
+    const { default: JSZip } = await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm");
+    const z = new JSZip(), used = new Set();
+    all.forEach(o => {
+      let k = o.name, i = 1;
+      while (used.has(k)) k = o.name.replace(/(\.[^.]+)$/, `_${++i}$1`);
+      used.add(k); z.file(k, o.blob);
+    });
+    const blob = await z.generateAsync({ type: "blob", compression: "STORE" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "photos.zip"; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    status(`ZIP скачан (${all.length} файл.)`);
+  } catch (e) {
+    console.error(e); status("ZIP не собрался, скачиваю по одному…");
+    for (const g of groups) for (const a of g.links) { a.click(); await sleep(350); }
+  }
 };
+$("#share").onclick = async () => {
+  const fl = groups.flatMap(g => g.outs || []).map(o => new File([o.blob], o.name, { type: o.blob.type }));
+  try { if (navigator.canShare({ files: fl })) await navigator.share({ files: fl }); else status("Это устройство не умеет делиться файлами, используй ZIP"); }
+  catch (e) { if (e.name !== "AbortError") status("Не вышло поделиться: " + e.message); }
+};
+const lb = $("#lb");
+document.addEventListener("click", e => {
+  if (e.target.tagName === "IMG" && !lb.contains(e.target) && (e.target.closest("#results") || e.target.closest("#prev"))) {
+    lb.querySelector("img").src = e.target.src; lb.style.display = "flex";
+  }
+});
+lb.onclick = () => lb.style.display = "none";
 
 load();
 </script>
